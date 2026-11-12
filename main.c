@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "input.h"
 #include "database.h"
 #include "auth.h"
 #include "patients.h"
@@ -12,7 +13,7 @@
 
 // Function prototypes
 void admin_menu();
-void patient_menu();
+void patient_menu(int user_id);
 
 // Declare functions used in main.c
 void manage_patients();
@@ -22,7 +23,6 @@ void view_sales();
 void manage_suppliers();
 void manage_staff();
 void book_appointment();
-void buy_medicine();
 void view_patient_record();  // Ensure that this function is declared correctly
 
 int main() {
@@ -30,16 +30,17 @@ int main() {
     
     // Prompt user for credentials
     printf("Enter username: ");
-    scanf("%s", username);
+    scanf("%99s", username);
     printf("Enter password: ");
-    scanf("%s", password);
+    scanf("%99s", password);
 
     // Authenticate user and get role
-    int role = authenticate_user(username, password); // Pass the arguments
+    int user_id;
+    int role = authenticate_user(username, password, &user_id);
     if (role == 1) {
         admin_menu();
     } else if (role == 2) {
-        patient_menu();
+        patient_menu(user_id);
     } else {
         printf("Invalid credentials. Exiting system.\n");
         return 0;
@@ -58,8 +59,9 @@ void admin_menu() {
         printf("5. Manage Suppliers\n");
         printf("6. Manage Staff\n");
         printf("7. Logout\n");
-        printf("Enter your choice: ");
-        scanf("%d", &choice);
+        if (!read_integer("Enter your choice: ", &choice)) {
+            return;
+        }
 
         switch (choice) {
             case 1:
@@ -89,7 +91,7 @@ void admin_menu() {
     } while (choice != 7);
 }
 
-void patient_menu() {
+void patient_menu(int user_id) {
     int choice;
     do {
         printf("\n=== Patient Menu ===\n");
@@ -97,15 +99,16 @@ void patient_menu() {
         printf("2. Buy Medicine\n");
         printf("3. View Your Record\n");
         printf("4. Logout\n");
-        printf("Enter your choice: ");
-        scanf("%d", &choice);
+        if (!read_integer("Enter your choice: ", &choice)) {
+            return;
+        }
 
         switch (choice) {
             case 1:
                 book_appointment();
                 break;
             case 2:
-                buy_medicine();
+                buy_medicine(user_id, 0);
                 break;
             case 3:
                 view_patient_record();  // This calls the correct function
@@ -118,4 +121,3 @@ void patient_menu() {
         }
     } while (choice != 4);
 }
-

@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sqlite3.h>
+#include "sqlite3.h"
 #include "database.h"
 
 // Function prototypes
@@ -47,8 +47,8 @@ void manage_suppliers() {
 // Add a new supplier record
 void add_supplier() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db"); // Corrected line
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
@@ -89,14 +89,14 @@ void add_supplier() {
 // View all suppliers
 void view_suppliers() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db"); // Corrected line
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
 
     sqlite3_stmt *stmt;
-    const char *sql = "SELECT supplier_id, name, contact, address FROM suppliers;";
+    const char *sql = "SELECT id, name, contact, address FROM suppliers ORDER BY id;";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
 
     if (rc != SQLITE_OK) {
@@ -123,8 +123,8 @@ void view_suppliers() {
 // Update supplier details
 void update_supplier() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db"); // Corrected line
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
@@ -141,7 +141,7 @@ void update_supplier() {
     scanf(" %[^\n]%*c", address);
 
     sqlite3_stmt *stmt;
-    const char *sql = "UPDATE suppliers SET name = ?, contact = ?, address = ? WHERE supplier_id = ?;";
+    const char *sql = "UPDATE suppliers SET name = ?, contact = ?, address = ? WHERE id = ?;";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
 
     if (rc != SQLITE_OK) {
@@ -169,8 +169,8 @@ void update_supplier() {
 // Delete supplier
 void delete_supplier() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db"); // Corrected line
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
@@ -180,7 +180,7 @@ void delete_supplier() {
     scanf("%d", &supplier_id);
 
     sqlite3_stmt *stmt;
-    const char *sql = "DELETE FROM suppliers WHERE supplier_id = ?;";
+    const char *sql = "DELETE FROM suppliers WHERE id = ?;";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
 
     if (rc != SQLITE_OK) {

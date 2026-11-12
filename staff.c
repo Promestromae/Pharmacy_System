@@ -1,12 +1,12 @@
 #include <stdio.h>
-#include <sqlite3.h>  // Add this for SQLite3 functions
+#include "sqlite3.h"
 #include "database.h"  // Include the database functions
 
 // Manage a new staff record
 void manage_staff() {  // Renamed function from add_staff to manage_staff
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db");  // Use the open_database function from database.c
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
@@ -47,8 +47,8 @@ void manage_staff() {  // Renamed function from add_staff to manage_staff
 // View all staff members
 void view_staff() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db");  // Use the open_database function from database.c
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
@@ -81,8 +81,8 @@ void view_staff() {
 // Update staff details
 void update_staff() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db");  // Use the open_database function from database.c
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }

@@ -6,6 +6,6 @@ void add_medicine();
 void view_medicines();  // Corrected here to match function name
 void update_medicine();
 void delete_medicine();
-void buy_medicine();  // Add this declaration
+void buy_medicine(int authenticated_user_id, int allow_user_selection);
 
 #endif

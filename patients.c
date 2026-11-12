@@ -1,16 +1,17 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <sqlite3.h>
+#include "patients.h"
+#include "input.h"
+#include "sqlite3.h"
 #include "database.h"
 
-// Function prototypes
-void manage_patients();
-void add_patient();
-void view_patient_record();  // Renamed function to match the header
-void update_patient();
-void delete_patient();
+static void bind_optional_text(sqlite3_stmt *stmt, int index, const char *value) {
+    if (value[0] == '\0') {
+        sqlite3_bind_null(stmt, index);
+    } else {
+        sqlite3_bind_text(stmt, index, value, -1, SQLITE_TRANSIENT);
+    }
+}
 
-// Manage patient records (menu options)
 void manage_patients() {
     int choice;
     do {
@@ -20,15 +21,16 @@ void manage_patients() {
         printf("3. Update Patient\n");
         printf("4. Delete Patient\n");
         printf("5. Back to Admin Menu\n");
-        printf("Enter your choice: ");
-        scanf("%d", &choice);
+        if (!read_integer("Enter your choice: ", &choice)) {
+            return;
+        }
 
         switch (choice) {
             case 1:
                 add_patient();
                 break;
             case 2:
-                view_patient_record();  // Call updated function
+                view_patient_record();
                 break;
             case 3:
                 update_patient();
@@ -44,156 +46,194 @@ void manage_patients() {
     } while (choice != 5);
 }
 
-// Add a new patient record
 void add_patient() {
-    sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db");  // Specify the database filename
-    if (rc != SQLITE_OK) return;
-
-    char name[100], address[200], phone[15];
+    char name[100];
+    char gender[32];
+    char contact[64];
+    char address[200];
     int age;
 
-    printf("Enter patient's name: ");
-    scanf(" %[^\n]%*c", name);
-    printf("Enter patient's age: ");
-    scanf("%d", &age);
-    printf("Enter patient's address: ");
-    scanf(" %[^\n]%*c", address);
-    printf("Enter patient's phone: ");
-    scanf(" %[^\n]%*c", phone);
-
-    sqlite3_stmt *stmt;
-    const char *sql = "INSERT INTO patients (name, age, address, phone) VALUES (?, ?, ?, ?);";
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-
-    if (rc != SQLITE_OK) {
-        printf("Failed to prepare statement: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
+    if (!read_line("Enter patient's name: ", name, sizeof(name)) ||
+        !read_integer("Enter patient's age: ", &age) ||
+        !read_line("Enter patient's gender (optional): ", gender, sizeof(gender)) ||
+        !read_line("Enter patient's contact (optional): ", contact, sizeof(contact)) ||
+        !read_line("Enter patient's address (optional): ", address, sizeof(address))) {
+        return;
+    }
+    if (name[0] == '\0' || age <= 0) {
+        printf("Patient name and a positive age are required.\n");
         return;
     }
 
-    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 2, age);
-    sqlite3_bind_text(stmt, 3, address, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, phone, -1, SQLITE_STATIC);
+    sqlite3 *db;
+    if (!open_database(&db, "pharmacy.db")) {
+        return;
+    }
 
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db,
+        "INSERT INTO patients (name, age, gender, contact, address) "
+        "VALUES (?, ?, ?, ?, ?);",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        printf("Failed to prepare patient record: %s\n", sqlite3_errmsg(db));
+        close_database(db);
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, age);
+    bind_optional_text(stmt, 3, gender);
+    bind_optional_text(stmt, 4, contact);
+    bind_optional_text(stmt, 5, address);
     rc = sqlite3_step(stmt);
     if (rc != SQLITE_DONE) {
-        printf("Failed to insert patient record: %s\n", sqlite3_errmsg(db));
+        printf("Failed to add patient: %s\n", sqlite3_errmsg(db));
     } else {
-        printf("Patient added successfully!\n");
+        printf("Patient added successfully. Patient ID: %d\n",
+               (int)sqlite3_last_insert_rowid(db));
     }
 
     sqlite3_finalize(stmt);
     close_database(db);
 }
 
-// View all patients' records
-void view_patient_record() {  // Updated function name
+void view_patient_record() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db");  // Specify the database filename
-    if (rc != SQLITE_OK) return;
-
-    sqlite3_stmt *stmt;
-    const char *sql = "SELECT * FROM patients;";
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-
-    if (rc != SQLITE_OK) {
-        printf("Failed to prepare statement: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
+    if (!open_database(&db, "pharmacy.db")) {
         return;
     }
 
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db,
+        "SELECT id, name, age, COALESCE(gender, 'Not provided'), "
+        "COALESCE(contact, 'Not provided'), "
+        "COALESCE(address, 'Not provided') "
+        "FROM patients ORDER BY id;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        printf("Failed to load patient records: %s\n", sqlite3_errmsg(db));
+        close_database(db);
+        return;
+    }
+
+    int count = 0;
     printf("\nPatient Records:\n");
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        int patient_id = sqlite3_column_int(stmt, 0);
-        const char *name = (const char *)sqlite3_column_text(stmt, 1);
-        int age = sqlite3_column_int(stmt, 2);
-        const char *address = (const char *)sqlite3_column_text(stmt, 3);
-        const char *phone = (const char *)sqlite3_column_text(stmt, 4);
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        char age[32];
+        if (sqlite3_column_type(stmt, 2) == SQLITE_NULL) {
+            snprintf(age, sizeof(age), "Not provided");
+        } else {
+            snprintf(age, sizeof(age), "%d", sqlite3_column_int(stmt, 2));
+        }
+        printf("ID: %d, Name: %s, Age: %s, Gender: %s, Phone: %s, Address: %s\n",
+               sqlite3_column_int(stmt, 0),
+               (const char *)sqlite3_column_text(stmt, 1),
+               age,
+               (const char *)sqlite3_column_text(stmt, 3),
+               (const char *)sqlite3_column_text(stmt, 4),
+               (const char *)sqlite3_column_text(stmt, 5));
+        count++;
+    }
 
-        printf("ID: %d, Name: %s, Age: %d, Address: %s, Phone: %s\n", patient_id, name, age, address, phone);
+    if (rc != SQLITE_DONE) {
+        printf("Failed while reading patient records: %s\n", sqlite3_errmsg(db));
+    } else if (count == 0) {
+        printf("No patient records found.\n");
     }
 
     sqlite3_finalize(stmt);
     close_database(db);
 }
 
-// Update an existing patient record
 void update_patient() {
-    sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db");  // Specify the database filename
-    if (rc != SQLITE_OK) return;
-
     int patient_id;
-    char name[100], address[200], phone[15];
-    int age;
-
-    printf("Enter patient ID to update: ");
-    scanf("%d", &patient_id);
-    printf("Enter new patient's name: ");
-    scanf(" %[^\n]%*c", name);
-    printf("Enter new patient's age: ");
-    scanf("%d", &age);
-    printf("Enter new patient's address: ");
-    scanf(" %[^\n]%*c", address);
-    printf("Enter new patient's phone: ");
-    scanf(" %[^\n]%*c", phone);
-
-    sqlite3_stmt *stmt;
-    const char *sql = "UPDATE patients SET name = ?, age = ?, address = ?, phone = ? WHERE patient_id = ?;";
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-
-    if (rc != SQLITE_OK) {
-        printf("Failed to prepare statement: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
+    if (!read_integer("Enter patient ID to update: ", &patient_id) || patient_id <= 0) {
+        printf("A valid patient ID is required.\n");
         return;
     }
 
-    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 2, age);
-    sqlite3_bind_text(stmt, 3, address, -1, SQLITE_STATIC);
-    sqlite3_bind_text(stmt, 4, phone, -1, SQLITE_STATIC);
-    sqlite3_bind_int(stmt, 5, patient_id);
+    char name[100];
+    char gender[32];
+    char contact[64];
+    char address[200];
+    int age;
+    if (!read_line("Enter new patient's name: ", name, sizeof(name)) ||
+        !read_integer("Enter new patient's age: ", &age) ||
+        !read_line("Enter new patient's gender (optional): ", gender, sizeof(gender)) ||
+        !read_line("Enter new patient's contact (optional): ", contact, sizeof(contact)) ||
+        !read_line("Enter new patient's address (optional): ", address, sizeof(address))) {
+        return;
+    }
+    if (name[0] == '\0' || age <= 0) {
+        printf("Patient name and a positive age are required.\n");
+        return;
+    }
 
+    sqlite3 *db;
+    if (!open_database(&db, "pharmacy.db")) {
+        return;
+    }
+
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db,
+        "UPDATE patients SET name = ?, age = ?, gender = ?, contact = ?, address = ? "
+        "WHERE id = ?;",
+        -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        printf("Failed to prepare patient update: %s\n", sqlite3_errmsg(db));
+        close_database(db);
+        return;
+    }
+
+    sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, age);
+    bind_optional_text(stmt, 3, gender);
+    bind_optional_text(stmt, 4, contact);
+    bind_optional_text(stmt, 5, address);
+    sqlite3_bind_int(stmt, 6, patient_id);
     rc = sqlite3_step(stmt);
     if (rc != SQLITE_DONE) {
-        printf("Failed to update patient record: %s\n", sqlite3_errmsg(db));
+        printf("Failed to update patient: %s\n", sqlite3_errmsg(db));
+    } else if (sqlite3_changes(db) == 0) {
+        printf("Patient ID %d was not found.\n", patient_id);
     } else {
-        printf("Patient updated successfully!\n");
+        printf("Patient updated successfully.\n");
     }
 
     sqlite3_finalize(stmt);
     close_database(db);
 }
 
-// Delete a patient record
 void delete_patient() {
-    sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db");  // Specify the database filename
-    if (rc != SQLITE_OK) return;
-
     int patient_id;
-    printf("Enter patient ID to delete: ");
-    scanf("%d", &patient_id);
+    if (!read_integer("Enter patient ID to delete: ", &patient_id) || patient_id <= 0) {
+        printf("A valid patient ID is required.\n");
+        return;
+    }
+
+    sqlite3 *db;
+    if (!open_database(&db, "pharmacy.db")) {
+        return;
+    }
 
     sqlite3_stmt *stmt;
-    const char *sql = "DELETE FROM patients WHERE patient_id = ?;";
-    rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
-
+    int rc = sqlite3_prepare_v2(db, "DELETE FROM patients WHERE id = ?;",
+                                -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
-        printf("Failed to prepare statement: %s\n", sqlite3_errmsg(db));
-        sqlite3_close(db);
+        printf("Failed to prepare patient deletion: %s\n", sqlite3_errmsg(db));
+        close_database(db);
         return;
     }
 
     sqlite3_bind_int(stmt, 1, patient_id);
-
     rc = sqlite3_step(stmt);
     if (rc != SQLITE_DONE) {
-        printf("Failed to delete patient record: %s\n", sqlite3_errmsg(db));
+        printf("Failed to delete patient: %s\n", sqlite3_errmsg(db));
+    } else if (sqlite3_changes(db) == 0) {
+        printf("Patient ID %d was not found.\n", patient_id);
     } else {
-        printf("Patient deleted successfully!\n");
+        printf("Patient deleted successfully.\n");
     }
 
     sqlite3_finalize(stmt);

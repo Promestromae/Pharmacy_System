@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sqlite3.h>
+#include "sqlite3.h"
 #include "database.h"
+#include "input.h"
 
 // Function prototypes
 void manage_sales();
@@ -42,8 +43,8 @@ void manage_sales() {
 // Add a new sale record
 void add_sale() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db"); // Updated to pass filename
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
@@ -93,16 +94,25 @@ void add_sale() {
 // View all sales records
 void view_sales() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db"); // Updated to pass filename
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
 
+    if (!ensure_sales_user_column(db)) {
+        close_database(db);
+        return;
+    }
+
     sqlite3_stmt *stmt;
-    const char *sql = "SELECT s.sale_id, p.name, m.name, s.quantity, s.total_price, s.sale_date FROM sales s "
-                      "JOIN patients p ON s.patient_id = p.patient_id "
-                      "JOIN medicines m ON s.medicine_id = m.medicine_id;";
+    const char *sql =
+        "SELECT s.id, COALESCE(u.username, 'Unknown'), "
+        "COALESCE(m.name, 'Deleted medicine'), s.quantity, s.total_price, s.date "
+        "FROM sales s "
+        "LEFT JOIN users u ON u.id = s.user_id "
+        "LEFT JOIN medicines m ON m.id = s.medicine_id "
+        "ORDER BY s.id DESC;";
     rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
 
     if (rc != SQLITE_OK) {
@@ -114,14 +124,14 @@ void view_sales() {
     printf("\nSales Records:\n");
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         int sale_id = sqlite3_column_int(stmt, 0);
-        const char *patient_name = (const char *)sqlite3_column_text(stmt, 1);
+        const char *username = (const char *)sqlite3_column_text(stmt, 1);
         const char *medicine_name = (const char *)sqlite3_column_text(stmt, 2);
         int quantity = sqlite3_column_int(stmt, 3);
         double total_price = sqlite3_column_double(stmt, 4);
         const char *sale_date = (const char *)sqlite3_column_text(stmt, 5);
 
-        printf("Sale ID: %d, Patient: %s, Medicine: %s, Quantity: %d, Total Price: %.2f, Date: %s\n",
-               sale_id, patient_name, medicine_name, quantity, total_price, sale_date);
+        printf("Sale ID: %d, User: %s, Medicine: %s, Quantity: %d, Total Price: %.2f, Date: %s\n",
+               sale_id, username, medicine_name, quantity, total_price, sale_date);
     }
 
     sqlite3_finalize(stmt);
@@ -131,15 +141,17 @@ void view_sales() {
 // Delete a sale record
 void delete_sale() {
     sqlite3 *db;
-    int rc = open_database(&db, "pharmacy.db"); // Updated to pass filename
-    if (rc != SQLITE_OK) {
+    int rc = open_database(&db, "pharmacy.db");
+    if (!rc) {
         printf("Failed to open database\n");
         return;
     }
 
     int sale_id;
-    printf("Enter Sale ID to delete: ");
-    scanf("%d", &sale_id);
+    if (!read_integer("Enter Sale ID to delete: ", &sale_id)) {
+        close_database(db);
+        return;
+    }
 
     sqlite3_stmt *stmt;
     const char *sql = "DELETE FROM sales WHERE sale_id = ?;";

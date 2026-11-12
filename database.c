@@ -1,20 +1,68 @@
 #include <stdio.h>
-#include <sqlite3.h>
+#include <string.h>
+#include "sqlite3.h"
 #include "database.h"
 
 // Function to open a database connection
 int open_database(sqlite3 **db, const char *filename) {
+    *db = NULL;
     int rc = sqlite3_open(filename, db);
-    if (rc) {
-        fprintf(stderr, "Can't open database: %s\n", sqlite3_errmsg(*db));
-        return 0;  // Return 0 for failure
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Can't open database: %s\n", *db ? sqlite3_errmsg(*db) : "unknown error");
+        if (*db) {
+            sqlite3_close(*db);
+            *db = NULL;
+        }
+        return 0;
     }
-    return 1;  // Return 1 for success
+    return 1;
 }
 
 // Function to close the database connection
 void close_database(sqlite3 *db) {
     sqlite3_close(db);
+}
+
+int ensure_sales_user_column(sqlite3 *db) {
+    sqlite3_stmt *stmt;
+    int rc = sqlite3_prepare_v2(db, "PRAGMA table_info(sales);", -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to inspect sales table: %s\n", sqlite3_errmsg(db));
+        return 0;
+    }
+
+    int has_user_id = 0;
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const char *column_name = (const char *)sqlite3_column_text(stmt, 1);
+        if (column_name && strcmp(column_name, "user_id") == 0) {
+            has_user_id = 1;
+            break;
+        }
+    }
+
+    if (rc != SQLITE_ROW && rc != SQLITE_DONE) {
+        fprintf(stderr, "Failed to inspect sales table: %s\n", sqlite3_errmsg(db));
+        sqlite3_finalize(stmt);
+        return 0;
+    }
+    sqlite3_finalize(stmt);
+
+    if (has_user_id) {
+        return 1;
+    }
+
+    char *error_message = NULL;
+    rc = sqlite3_exec(db,
+        "ALTER TABLE sales ADD COLUMN user_id INTEGER REFERENCES users(id);",
+        NULL, NULL, &error_message);
+    if (rc != SQLITE_OK) {
+        fprintf(stderr, "Failed to add user tracking to sales: %s\n",
+                error_message ? error_message : sqlite3_errmsg(db));
+        sqlite3_free(error_message);
+        return 0;
+    }
+
+    return 1;
 }
 
 // Function to create the necessary tables

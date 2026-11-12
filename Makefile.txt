@@ -6,8 +6,8 @@ SRC = main.c patients.c medicines.c sales.c appointments.c suppliers.c staff.c a
 OBJ = $(SRC:.c=.o)
 EXEC = pharmacy_system
 
-# Link with SQLite library
-LIBS = -lsqlite3
+# SQLite is compiled from the bundled sqlite3.c source file.
+LIBS =
 
 # Default target: build the executable
 all: $(EXEC)
@@ -27,4 +27,3 @@ clean:
 # Target to run the program
 run: $(EXEC)
 	./$(EXEC)
-
